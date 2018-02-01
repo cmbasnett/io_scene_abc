@@ -50,17 +50,6 @@ def import_model(model, options):
         if bone.parent is not None:
             bone.use_connect = bone.parent.tail == bone.head
             print(bone.use_connect, node.is_removable)
-            # TODO: this will probably have to be more inclusive
-
-        # =================================================
-        # DEBUGGING STUFF
-        # =================================================
-        # bone.use_connect = True
-        # bone.use_inherit_rotation = False
-        # =================================================
-
-        # TODO: not sure that this actually does anything?
-        bone.use_local_location = node.uses_relative_location
 
         '''
         Get the forward, left, and up vectors of the bone (used later for determining the roll).
@@ -303,18 +292,8 @@ def import_model(model, options):
                 bpy.context.scene.frame_set(keyframe.time)
                 for node_index, (pose_bone, bone, node) in enumerate(zip(armature_object.pose.bones, armature.bones, model.nodes)):
                     assert(pose_bone.name == node.name)
-                    #corrective_quaternion = Matrix.Rotation(math.radians(90), 4, 'Z').to_quaternion()
-                    # TODO: perhaps some sort of permutation testing!
                     transform = animation.node_keyframe_transforms[node_index][keyframe_index]
-                    #r = transform.rotation * corrective_quaternion
-                    #diff = r.rotation_difference(bone.matrix_local.to_quaternion())
-                    #print(bone.matrix_local.to_quaternion(), pose_bone.matrix.to_quaternion())
-                    # TODO: transform locations need to be swizzled
-                    pose_bone.location = transform.location.yzx
-                    pose_bone.location.z *= -1
-                    #pose_bone.rotation_quaternion = transform.rotation.conjugated()
-                    #pose_bone.location = armature_object.matrix_world.inverted() * pose_bone.bone.matrix_local.inverted() * -transform.location
-                    #pose_bone.rotation_quaternion = armature_object.rotation_quaternion.inverted() * pose_bone.bone.matrix_local.to_quaternion().inverted() * transform.rotation
+
                 for bone, node in zip(armature_object.pose.bones, model.nodes):
                     bone.keyframe_insert('location')
                     bone.keyframe_insert('rotation_quaternion')
