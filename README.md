@@ -10,6 +10,7 @@ The ABC file format description can be found on our wiki [here](https://github.c
 This addon is a **work in progress**! If you would like to help with this project, please contact me on Discord (Colin Basnett#0827).
 
 ## Known Issues
+Though the animation data format is known, this plugin does not yet support the importing or exporting of animations.
 
 ## Credits
 * **Colin Basnett** - Programming
