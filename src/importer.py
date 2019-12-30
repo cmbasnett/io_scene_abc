@@ -181,7 +181,6 @@ def import_model(model, options):
     ''' Create a mesh for each piece of each LOD level that we are importing. '''
     for lod_index in range(lod_import_count):
         for piece_index, piece in enumerate(model.pieces):
-            print("Procesing piece [", piece_index, "] ", piece.name)
             lod = piece.lods[lod_index]
 
             ''' Create the object and mesh. '''
@@ -265,7 +264,6 @@ def import_model(model, options):
             # Set the correct UV as active
             uv_texture.active_render = True
 
-            print(uv_texture)
             for face_index, face in enumerate(lod.faces):
                 material_face_offset = material_face_offsets[0]  # TODO: is this right?
                 texcoords = [vertex.texcoord for vertex in face.vertices]
@@ -273,7 +271,6 @@ def import_model(model, options):
                     uv = texcoords[i][0], 1.0 - texcoords[i][1]
                     uv_texture.data[(material_face_offset + face_index) * 3 + i].uv = uv
             material_face_offsets[0] += len(lod.faces)
-            print(material_face_offsets)
 
             ''' Assign normals '''
             face_offset = 0
@@ -353,24 +350,24 @@ def import_model(model, options):
 
                     #print("[",node_index,"] Applying transform to : ", node.name)
 
-                    if node_index > -1:
-                        # Get the current transform
-                        transform = animation.node_keyframe_transforms[node_index][keyframe_index]
 
-                        # Correct-ish
-                        # rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
+                    # Get the current transform
+                    transform = animation.node_keyframe_transforms[node_index][keyframe_index]
+
+                    # Correct-ish
+                    # rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
 
 
-                        rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
+                    rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
 
-                        matrix = rotation.to_matrix().to_4x4() # transform.rotation.to_matrix().to_4x4()
+                    matrix = rotation.to_matrix().to_4x4() # transform.rotation.to_matrix().to_4x4()
 
-                        # Apply the translation
-                        matrix.Translation(transform.location.xzy)
-     
-                        
-                        # Use a matrix instead!
-                        pose_bone.matrix = parent_matrix @ matrix
+                    # Apply the translation
+                    matrix.Translation(transform.location.xzy)
+    
+                    
+                    # Use a matrix instead!
+                    pose_bone.matrix = parent_matrix @ matrix
 
                     # Recursively apply our transform to our children!
                     # print("[",node_index,"] Found children count : ", node.child_count)
