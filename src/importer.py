@@ -323,23 +323,90 @@ def import_model(model, options):
 
         actions = []
 
+        index = 0
         for animation in model.animations:
-            action = bpy.data.actions.new(name=animation.name)
-            armature_object.animation_data.action = action
-            for keyframe_index, keyframe in enumerate(animation.keyframes):
-                bpy.context.scene.frame_set(keyframe.time)
-                for node_index, (pose_bone, bone, node) in enumerate(zip(armature_object.pose.bones, armature.bones, model.nodes)):
-                    assert(pose_bone.name == node.name)
-                    transform = animation.node_keyframe_transforms[node_index][keyframe_index]
+            print("Processing ", animation.name)
+            if(index > 0):
+                break
 
+            index  = index + 1
+            # Create a new action with the animation name
+            action = bpy.data.actions.new(name=animation.name)
+            
+            # Temp set
+            armature_object.animation_data.action = action
+
+            # For every keyframe
+            for keyframe_index, keyframe in enumerate(animation.keyframes):
+                # Set keyframe time - Scale it down because it's way too slow for testing
+                Context.scene.frame_set(keyframe.time * 0.01)
+           
+                '''
+                Recursively apply transformations to a nodes children
+                Notes: It carries everything (nodes, pose_bones..) with it, because I expected it to not be a child of this scope...oops!
+                '''
+                def recursively_apply_transform(nodes, node_index, pose_bones, parent_matrix):
+                    # keyframe_index = 0
+                    node = nodes[node_index]
+                    pose_bone = pose_bones[node_index]
+                    original_index = node_index
+
+                    #print("[",node_index,"] Applying transform to : ", node.name)
+
+                    if node_index > -1:
+                        # Get the current transform
+                        transform = animation.node_keyframe_transforms[node_index][keyframe_index]
+
+                        # Correct-ish
+                        # rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
+
+
+                        rotation = Quaternion( (transform.rotation.w, -transform.rotation.z, -transform.rotation.x, transform.rotation.y) )
+
+                        matrix = rotation.to_matrix().to_4x4() # transform.rotation.to_matrix().to_4x4()
+
+                        # Apply the translation
+                        matrix.Translation(transform.location.xzy)
+     
+                        
+                        # Use a matrix instead!
+                        pose_bone.matrix = parent_matrix @ matrix
+
+                    # Recursively apply our transform to our children!
+                    # print("[",node_index,"] Found children count : ", node.child_count)
+
+                    #if (node.child_count):
+                    #    print("[",original_index,"] Recurse Start --- ",node.name)
+
+                    for index in range(0, node.child_count):
+                        node_index = node_index + 1
+                        #print("[",original_index,"] Applying transform to child : ", nodes[node_index].name)
+
+                        node_index = recursively_apply_transform(nodes, node_index, pose_bones, pose_bone.matrix)
+                    
+                    #if (node.child_count):
+                    #    print("[",original_index,"] Recurse End   --- ",node.name)
+
+                    return node_index
+                '''
+                Func End
+                '''
+
+                recursively_apply_transform(model.nodes, 0, armature_object.pose.bones, Matrix())
+
+                # For every bone
                 for bone, node in zip(armature_object.pose.bones, model.nodes):
                     bone.keyframe_insert('location')
                     bone.keyframe_insert('rotation_quaternion')
+
+            # Add to actions array
             actions.append(action)
 
+        # Add our actions to animation data
         armature_object.animation_data.action = actions[0]
 
-    bpy.context.scene.frame_set(0)
+    # Set our keyframe time to 0
+    Context.scene.frame_set(0)
 
     # TODO: make an option to convert to blender coordinate system
     # armature_object.rotation_euler.x = math.radians(90)
