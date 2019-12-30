@@ -3,7 +3,8 @@ import bpy_extras
 import bmesh
 import os
 import math
-from mathutils import Vector, Matrix, Quaternion
+from math import pi
+from mathutils import Vector, Matrix, Quaternion, Euler
 from bpy.props import StringProperty, BoolProperty, FloatProperty
 from .dtx import DTX
 from .reader import ModelReader
@@ -21,20 +22,35 @@ class ModelImportOptions(object):
 
 
 def import_model(model, options):
-    utils.delete_all_objects()
+    # utils.delete_all_objects()
+
+    # This seems to be the rage these days
+    Context = bpy.context
+    Data = bpy.data
+    Ops = bpy.ops
+
+    # Create our new collection. This will help us later on..
+    collection = Data.collections.new(model.name)
+    # Add our collection to the scene
+    Context.scene.collection.children.link(collection)
 
     # TODO: clear the orphan list for ultra name purity
-    bpy.ops.object.lamp_add(type='SUN')
+    sun = Data.lights.new(name="Sun", type='SUN')
+    sun_object = Data.objects.new("Sun", sun)
+    collection.objects.link(sun_object)
 
     # Create the armature
     armature = bpy.data.armatures.new(model.name)
     armature_object = bpy.data.objects.new(model.name, armature)
-    armature_object.data.draw_type = 'STICK'
-    armature_object.show_x_ray = True
+    armature_object.data.display_type = 'STICK'
+    armature_object.show_in_front = True
 
-    bpy.context.scene.objects.link(armature_object)
-    bpy.context.scene.objects.active = armature_object
-    bpy.ops.object.mode_set(mode='EDIT')
+    collection.objects.link(armature_object)
+    armature_object.select_set(True)
+    #armature_object.edit_bones()
+
+    Context.view_layer.objects.active = armature_object
+    Ops.object.mode_set(mode='EDIT')
 
     for node in model.nodes:
         bone = armature.edit_bones.new(node.name)
@@ -113,67 +129,83 @@ def import_model(model, options):
 
             # TODO: Now calculate the roll of the bone.
 
-    bpy.ops.object.mode_set(mode='OBJECT')
+    Ops.object.mode_set(mode='OBJECT')
 
     ''' Add sockets as empties with a child-of constraint to the appropriate bone. '''
     if options.should_import_sockets:
         for socket in model.sockets:
-            empty_object = bpy.data.objects.new(socket.name, None)
+            empty_object = Data.objects.new(socket.name, None)
             empty_object.location = socket.location
             empty_object.rotation_quaternion = socket.rotation
-            empty_object.empty_draw_type = 'PLAIN_AXES'
+            empty_object.empty_display_type = 'PLAIN_AXES'
             child_of_constraint = empty_object.constraints.new('CHILD_OF')
             child_of_constraint.target = armature_object
             child_of_constraint.subtarget = model.nodes[socket.node_index].name
             empty_object.parent = armature_object
-            bpy.context.scene.objects.link(empty_object)
+            collection.objects.link(empty_object)
 
     ''' Determine the amount of LODs to import. '''
     lod_import_count = model.lod_count if options.should_import_lods else 1
 
     ''' Create materials. '''
     materials = []
+
     for i, piece in enumerate(model.pieces):
         while len(materials) <= piece.material_index:
             ''' Create a material for the new piece. '''
-            material = bpy.data.materials.new(piece.name)
-            material.diffuse_intensity = 1.0
+            material = Data.materials.new(piece.name)
             material.specular_intensity = piece.specular_power / 100
+
+            material.use_nodes = True
+
             # TODO: maybe put something in here for the specular scale?
             materials.append(material)
 
             ''' Create texture. '''
-            texture = bpy.data.textures.new(piece.name, type='IMAGE')
+            
+            # Swapped over to nodes
+            bsdf = material.node_tree.nodes["Principled BSDF"]
+            texImage = material.node_tree.nodes.new('ShaderNodeTexImage')
+            material.node_tree.links.new(bsdf.inputs['Base Color'], texImage.outputs['Color'])
 
+            texture = Data.textures.new(piece.name, type='IMAGE')
+
+            # Note: Texture image names are stored in ModelButes.txt
             if options.image is not None:
-                texture.image = bpy.data.images.new('okay', width=options.image.width, height=options.image.height, alpha=True) # TODO: get real name
+                texture.image = bpy.data.images.new(piece.name, width=options.image.width, height=options.image.height, alpha=True) # TODO: get real name
                 texture.image.pixels[:] = options.image.pixels[:]
 
-            texture_slot = material.texture_slots.add()
-            texture_slot.texture = texture
+            texImage.image = texture.image
+
 
     ''' Create a mesh for each piece of each LOD level that we are importing. '''
     for lod_index in range(lod_import_count):
         for piece_index, piece in enumerate(model.pieces):
+            print("Procesing piece [", piece_index, "] ", piece.name)
             lod = piece.lods[lod_index]
 
             ''' Create the object and mesh. '''
             mesh_name = piece.name
             if options.should_import_lods:
                 mesh_name += '.LOD{0!s}'.format(lod_index)
-            mesh = bpy.data.meshes.new(model.name)
-            mesh_object = bpy.data.objects.new(mesh_name, mesh)
+            mesh = Data.meshes.new(model.name)
+            mesh_object = Data.objects.new(mesh_name, mesh)
 
             ''' Add materials to mesh. '''
             for material in materials:
                 ''' Create UV map. '''
+                '''
                 uv_texture = mesh.uv_textures.new()
                 mesh.materials.append(material)
                 material.texture_slots[0].uv_layer = uv_texture.name
+                '''
+                uv_texture = mesh.uv_layers.new()
+                mesh.materials.append(material)
+                # material.uv_layers[0].name = uv_texture.name
 
             ''' Create a vertex group for each node. '''
             for node in model.nodes:
-                mesh_object.vertex_groups.new(node.name)
+                mesh_object.vertex_groups.new(name=node.name)
 
             # TODO: these need to be reset for each mesh
             vertex_offset = 0
@@ -228,8 +260,12 @@ def import_model(model, options):
             Assign texture coordinates.
             '''
             material_face_offsets = [0] * len(mesh.materials)
-
             uv_texture = mesh.uv_layers[piece.material_index]
+
+            # Set the correct UV as active
+            uv_texture.active_render = True
+
+            print(uv_texture)
             for face_index, face in enumerate(lod.faces):
                 material_face_offset = material_face_offsets[0]  # TODO: is this right?
                 texcoords = [vertex.texcoord for vertex in face.vertices]
@@ -237,6 +273,7 @@ def import_model(model, options):
                     uv = texcoords[i][0], 1.0 - texcoords[i][1]
                     uv_texture.data[(material_face_offset + face_index) * 3 + i].uv = uv
             material_face_offsets[0] += len(lod.faces)
+            print(material_face_offsets)
 
             ''' Assign normals '''
             face_offset = 0
@@ -252,11 +289,12 @@ def import_model(model, options):
             mesh.validate(clean_customdata=False)
             mesh.update(calc_edges=False)
 
-            bpy.context.scene.objects.link(mesh_object)
+            # add it to our collection c:
+            collection.objects.link(mesh_object)
 
-            if bpy.ops.object.mode_set.poll():
-                bpy.ops.object.mode_set(mode='OBJECT')
-            bpy.ops.object.select_all(action='DESELECT')
+            if Ops.object.mode_set.poll():
+                Ops.object.mode_set(mode='OBJECT')
+            Ops.object.select_all(action='DESELECT')
 
             ''' Add an armature modifier. '''
             armature_modifier = mesh_object.modifiers.new(name='Armature', type='ARMATURE')
@@ -365,27 +403,37 @@ class ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         default=False,
     )
 
+    should_clear_scene = BoolProperty(
+        name="Clear Scene",
+        description="When checked, the scene will be cleared before the model is imported.",
+        default=False,
+    )
+
     def draw(self, context):
         layout = self.layout
 
         box = layout.box()
-        box.label("Nodes")
+        box.label(text='Nodes')
         box.row().prop(self, 'bone_length_min')
         box.row().prop(self, 'should_import_sockets')
 
         box = layout.box()
-        box.label('Meshes')
+        box.label(text='Meshes')
         box.row().prop(self, 'should_import_lods')
         box.row().prop(self, 'should_merge_pieces')
 
         box = layout.box()
-        box.label('Materials')
+        box.label(text='Materials')
         box.row().prop(self, 'should_import_textures')
-        box.row().prop(self, 'should_assign_materials')
+        # box.row().prop(self, 'should_assign_materials')
 
         box = layout.box()
-        box.label('Animations')
+        box.label(text='Animations')
         box.row().prop(self, 'should_import_animations')
+
+        box = layout.box()
+        box.label(text='Misc')
+        box.row().prop(self, 'should_clear_scene')
 
     def execute(self, context):
         # Load the model
@@ -406,6 +454,7 @@ class ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         options.should_import_animations = self.should_import_animations
         options.should_import_sockets = self.should_import_sockets
         options.should_merge_pieces = self.should_merge_pieces
+        options.should_clear_scene = self.should_clear_scene
         options.image = image
         import_model(model, options)
         return {'FINISHED'}
